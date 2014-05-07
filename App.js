@@ -1,0 +1,180 @@
+Ext.define('CustomApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+    items:[
+        {
+            xtype: 'container',
+            itemId: 'widgets',
+        },
+        {
+            xtype: 'container',
+            itemId:'gridContainer',
+            columnWidth: 1
+        }
+        
+        
+    ],
+    launch: function() {
+        var that = this;
+        that._getTasks();
+    },
+    _getTasks: function() {
+        var that = this;
+         
+        
+        var today = new Date().toISOString();
+
+        
+        Ext.create('Rally.data.wsapi.Store', {
+                model: 'Task',
+                fetch: ['ObjectID', 'FormattedID', 'Name', 'State', 'WorkProduct', 'c_MyKB'],
+                autoLoad: true,
+                filters: [
+                    {
+                        property: 'State',
+                        operator: '!=',
+                        value: 'Completed'
+                    },
+                    {
+                        property: 'Iteration.StartDate',
+                        operator: '<=',
+                        value: today
+                    },
+                    {
+                        property: 'Iteration.EndDate',
+                        operator: '>=',
+                        value: today
+                    },
+                    {
+                        property: 'Owner',
+                        value: Rally.environment.getContext().getUser().getRef()
+                    }
+                ],
+                listeners: {
+                    load: this._onDataLoaded,
+                    scope: this
+                },
+        });
+    },
+    _onDataLoaded: function(store, records){
+        var that = this;
+        var promises = [];
+         _.each(records, function(task) {
+            promises.push(that._getTaskWorkproduct(task, that));
+        });
+
+        Deft.Promise.all(promises).then({
+            success: function(results) {
+                that._tasks = results;
+                console.log('success', that._tasks);
+                that._makeGrid();
+            }
+        });
+    },
+    
+    _getTaskWorkproduct: function(task, scope) {
+        var deferred = Ext.create('Deft.Deferred');
+        var that = scope;
+        var  workproductKanbanState = null;
+        var type = null;
+        
+        if (task.get('WorkProduct')._type === "HierarchicalRequirement") {
+            type = 'UserStory';
+        }
+        else if(task.get('WorkProduct')._type === "Defect"){
+            type = 'Defect';
+        }
+        
+        var taskWorkproductOid = task.get('WorkProduct').ObjectID;
+        console.log('taskWorkproductOid', taskWorkproductOid);
+        
+        Rally.data.ModelFactory.getModel({
+            type: type,
+            scope: this,
+            success: function(model, operation) {
+                fetch: ['c_MyKB'],
+                model.load(taskWorkproductOid, {
+                    scope: this,
+                    success: function(record, operation) {
+                        workproductKanbanState = record.get('c_MyKB');
+                        workproductFID = record.get('FormattedID');
+                        var taskRef = task.get('_ref');
+                        var taskObjectID  = task.get('ObjectID');
+                        var taskFormattedID = task.get('FormattedID');
+                        var taskName  = task.get('Name');
+                        var taskState = task.get('State');
+                        var taskWorkproduct = task.get('WorkProduct');
+                        var taskWorkproductFormattedID = task.get('WorkProduct').FormattedID;
+                        
+                        result = {
+                                    "_ref"          : taskRef,
+                                    "ObjectID"      : taskObjectID,
+                                    "FormattedID"   : taskFormattedID,
+                                    "Name"          : taskName,
+                                    "State"         : taskState,
+                                    "WorkProduct"   : taskWorkproduct,
+                                    "Kanban"        : workproductKanbanState,
+                                    "WorkProductFID": taskWorkproductFormattedID    
+                                };
+                        deferred.resolve(result);    
+                    }
+                });
+            }
+        });
+        
+       //was here
+        return deferred;
+        
+    },
+    
+    _makeGrid: function() {
+        var that = this;
+
+        if (that._taskGrid) {
+            that._taskGrid.destroy();
+        }
+
+        var gridStore = Ext.create('Rally.data.custom.Store', {
+            data: that._tasks,
+            groupField: 'WorkProductFID',
+            pageSize: 1000,
+        });
+
+        that._taskGrid = Ext.create('Rally.ui.grid.Grid', {
+            itemId: 'taskGrid',
+            store: gridStore,
+            features: [{ftype:'grouping'}],
+            columnCfgs: [
+                {
+                    text: 'Formatted ID', dataIndex: 'FormattedID', xtype: 'templatecolumn',
+                    tpl: Ext.create('Rally.ui.renderer.template.FormattedIDTemplate')
+                },
+                {
+                    text: 'Name', dataIndex: 'Name', 
+                },
+                {
+                    text: 'State', dataIndex: 'State',
+                },
+                {
+                    text: 'WorkProduct', dataIndex: 'WorkProduct',
+                    renderer: function(val, meta, record) {
+                        var type;
+                        if(record.get('WorkProduct')._type === "HierarchicalRequirement") {
+                            type = 'userstory';
+                        }
+                        else if(record.get('WorkProduct')._type === "Defect"){
+                            type = 'defect';
+                        }
+                        return '<a href="https://rally1.rallydev.com/#/detail/' + type + '/' + record.get('WorkProduct').ObjectID + '" target="_blank">' + record.get('WorkProduct').FormattedID + '</a>';
+                    }
+                },
+                {
+                    text: 'Kanban', dataIndex: 'Kanban',
+                }
+            ]
+        });
+
+        that.add(that._taskGrid);
+        that._taskGrid.reconfigure(gridStore);
+    }
+});
