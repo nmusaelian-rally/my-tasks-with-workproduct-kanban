@@ -7,7 +7,7 @@ This app builds a grid of tasks similar to standard MyTasks custom grid where ta
 ((State != Completed) AND ((Owner = {user}) AND ((Iteration.StartDate <= today) AND (Iteration.EndDate >= today))))
 but also gets custom Kanban state values of taks' WorkProdcut
 
-![](pic1.png)
+![](pic.png)
 
 This app is available on AS IS basis. It is not supported by Rally support.
 ## License
